@@ -1,64 +1,44 @@
-# Automated Code Quality Assessment via LLM Inference
+# AI Code Reviewer
 
-Uses TinyLlama-1.1B to review code snippets for bugs, security holes, performance issues, and style problems. The model reads your code, thinks about what could go wrong, and gives you a structured report with severity ratings.
+TinyLlama-1.1B generates free-form suggestions about a code snippet, using general, security, performance or style prompts. It does not run the code, perform static analysis or validate its findings. The API returns review text, not a parsed report with severity ratings.
 
-## how it works
+## Run locally
 
-```
-code snippet → tokenizer → TinyLlama-1.1B → structured review
-```
-
-The system wraps TinyLlama in a chat-style prompt that instructs it to act like a senior code reviewer. It supports four review modes (general, security, performance, style) and can stream tokens back in real-time via SSE.
-
-**model details:**
-- TinyLlama/TinyLlama-1.1B-Chat-v1.0 (1.1B parameters)
-- KV cache enabled for faster autoregressive decoding
-- repetition penalty of 1.15 to reduce loops
-- runs on CUDA if available, falls back to CPU
-
-## setup
+Use Python 3.10+ and a virtual environment. From the repository root:
 
 ```bash
-pip install -r requirements.txt
-python main.py
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
-server starts at `localhost:8001`. hit `/docs` for the swagger UI.
+On Windows PowerShell, replace the activation line with `.\.venv\Scripts\Activate.ps1`. Open `http://127.0.0.1:8001/docs`.
 
-## api
+Startup loads `TinyLlama/TinyLlama-1.1B-Chat-v1.0`, downloading it if it is not cached. The code selects CUDA when available, otherwise CPU. Dependencies are unpinned; a working environment and GPU compatibility are not guaranteed by the requirements list.
 
-| endpoint | method | what it does |
-|----------|--------|-------------|
-| `/health` | GET | status check, shows device info |
-| `/review` | POST | full code review (blocking) |
-| `/review/stream` | POST | token-by-token streaming via SSE |
-| `/review/batch` | POST | review up to 5 snippets at once |
+The explicit [Uvicorn host setting](https://uvicorn.dev/settings/) keeps this launch on loopback. `python main.py` instead binds to `0.0.0.0` with reload enabled. The API has no authentication and permits all CORS origins; do not expose it as a public review service.
 
-## architecture
+## API and interface
 
-```
-core/
-├── config.py      → model IDs, prompts, generation parameters
-└── reviewer.py    → CodeReviewer class, inference + streaming
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/health` | Model/device status |
+| POST | `/review` | One generated review |
+| POST | `/review/stream` | Generated tokens via SSE |
+| POST | `/review/batch` | Up to five snippets, reviewed sequentially |
 
-api/
-├── schemas.py     → pydantic request/response models
-└── routes.py      → endpoint handlers
+`streamlit run app.py` starts a separate interface for pasting code and choosing a review focus. It loads its own model instance rather than calling the API; running both consumes additional memory.
 
-main.py            → FastAPI entry point, lifespan
-app.py             → streamlit frontend
-```
+## Implementation and limits
 
-## streamlit demo
+[core/reviewer.py](core/reviewer.py) tokenizes the prompt, truncates input to 2,048 tokens and samples generated text. [core/config.py](core/config.py) sets temperature 0.7, repetition penalty 1.1 and KV caching. Responses are defined in [api/schemas.py](api/schemas.py).
 
-```bash
-streamlit run app.py
-```
+Generated advice can miss vulnerabilities or invent problems. Treat it as a suggestion to inspect, not approval, a security audit or evidence that code is correct. No test suite, quality evaluation or timing benchmark is committed.
 
-interactive UI where you paste code, pick a language and review focus, and get back a structured analysis.
+Setup, model execution and browser flows were not rerun for this documentation update.
 
-## requirements
+## Related implementations
 
-- python 3.10+
-- ~3GB disk for model weights (downloaded on first run)
-- GPU optional but recommended
+This project also appears in [ML-Portfolio-Projects](https://github.com/Zinga18018/ML-Portfolio-Projects), as an [API variant](https://github.com/Zinga18018/ML-Portfolio-Projects/tree/master/project1-ai-code-reviewer) and an [HF Space variant](https://github.com/Zinga18018/ML-Portfolio-Projects/tree/master/hf-spaces/ai-code-reviewer). Their code differs: the HF variant parses severity labels and computes a heuristic score; this repository returns free-form text. This README describes only this implementation.
+
